@@ -39,7 +39,7 @@ English memos are AI-translated from the Korean memos. Some NPC, object and mech
 
 ## Installation
 
-1. Download the latest release from CurseForge or from the [Releases](../../releases) page of this repository.
+1. Download the latest release from [CurseForge](https://www.curseforge.com/wow/addons/honeydelvetoday) or from the [Releases](../../releases) page of this repository.
 2. Extract it so that the folder is `World of Warcraft/_retail_/Interface/AddOns/HoneyDelveToday`.
 3. Restart the game or type `/reload`.
 
@@ -59,7 +59,11 @@ Please do not use GitHub's "Download ZIP" button. It renames the folder to `Hone
 
 ## Feedback
 
-This addon is developed as a personal hobby project, and code contributions are not accepted. Bug reports and feedback are welcome in the CurseForge comments.
+Bug reports and feedback are welcome. [GitHub Issues](https://github.com/jasonthenurungs/HoneyDelveToday/issues) are recommended because reports stay on record and are easy to follow up. You can also leave a message in the [CurseForge comments](https://www.curseforge.com/wow/addons/honeydelvetoday/comments).
+
+When reporting a bug, please include your client language and, if possible, the output of `/hdt locale`.
+
+This addon is developed as a personal hobby project, so code contributions (pull requests) are not accepted.
 
 ## Credits
 
@@ -111,7 +115,7 @@ The addon code is released under the MIT License. The libraries in `libs/` keep 
 
 ## 설치
 
-1. 커스포지 또는 이 저장소의 [Releases](../../releases) 페이지에서 최신 버전을 내려받습니다.
+1. [커스포지](https://www.curseforge.com/wow/addons/honeydelvetoday) 또는 이 저장소의 [Releases](../../releases) 페이지에서 최신 버전을 내려받습니다.
 2. 압축을 풀어 `World of Warcraft/_retail_/Interface/AddOns/HoneyDelveToday` 폴더가 되도록 넣습니다.
 3. 게임을 다시 시작하거나 `/reload`를 입력합니다.
 
@@ -131,7 +135,11 @@ GitHub의 "Download ZIP" 버튼은 사용하지 마세요. 폴더 이름이 `Hon
 
 ## 피드백
 
-개인 취미로 개발하는 애드온이라 코드 기여는 받지 않습니다. 버그 제보와 의견은 커스포지 댓글로 남겨 주세요.
+버그 제보와 의견은 언제나 환영합니다. 기록이 남아 처리 상황을 확인하기 쉬운 [깃허브 이슈](https://github.com/jasonthenurungs/HoneyDelveToday/issues)를 권장하며, [커스포지 댓글](https://www.curseforge.com/wow/addons/honeydelvetoday/comments)로 남기셔도 됩니다.
+
+버그를 제보하실 때는 게임 클라이언트 언어와, 가능하면 `/hdt locale` 출력 결과를 함께 적어 주세요.
+
+개인 취미로 개발하는 애드온이라 코드 기여(풀 리퀘스트)는 받지 않습니다.
 
 ## 크레딧
 
