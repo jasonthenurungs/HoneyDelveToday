@@ -53,6 +53,61 @@ local VAULT_ICON = "Interface\\Icons\\INV_Misc_Lockbox_1"
 -- 별 문자(U+2605)를 UTF-8 바이트 이스케이프로 표기
 local STAR_MARK = "\226\152\133"
 
+-- 잘못 놓여진 진귀품 버프 (구렁 바닥의 잘못 놓여진 진귀품을 주우면 걸리는 버프)
+-- 주문 ID 1280098, 아이콘 ID 2967107 (인게임 툴팁으로 확인, 한국어 버프 이름 "은혜")
+-- 버프 설명(최대 생명력, 이동 속도 등 누적 수치)은 버프 툴팁 데이터에서 그대로 읽는다.
+local CURIO_BUFF_SPELL_ID = 1280098
+local CURIO_BUFF_ICON_FALLBACK = 2967107
+
+-- 진귀품 버프 표시용 문구
+-- Locale.lua를 고치지 않고 이 파일만 바꿔도 동작하도록 여기에 둔다. (나중에 Locale.lua로 옮겨도 된다)
+-- 표시 언어가 koKR이 아니면 enUS 문구를 쓴다.
+local CURIO_TEXT = {
+    koKR = {
+        GROUP = "진귀품 버프 표시",
+        DESC = "구렁에서 잘못 놓여진 진귀품을 주우면 걸리는 버프(%s)의 내용을 버프창을 찾아보지 않아도 볼 수 있도록 화면에 띄웁니다.",
+        SHOW = "진귀품 버프 내용 표시",
+        LOCK = "위치 잠금",
+        LOCK_DESC = "잠금을 풀면 버프가 없어도 미리보기 창이 나타나며, 마우스로 끌어서 옮길 수 있습니다.\n위치를 정한 뒤 다시 잠그면 창이 마우스 클릭을 가로채지 않습니다.",
+        FONT_SIZE = "글자 크기",
+        BG_ALPHA = "배경 투명도",
+        RESET_POS = "위치 초기화",
+        RESET_POS_DESC = "진귀품 버프 창을 화면 중앙 위쪽으로 되돌립니다.",
+        PREVIEW = "(미리보기, 끌어서 이동)",
+        SAMPLE = "버프를 얻으면 이곳에 내용이 표시됩니다.",
+        BUFF_FALLBACK = "은혜",
+    },
+    enUS = {
+        GROUP = "Curio Buff Display",
+        DESC = "Shows the details of the buff (%s) you get from picking up misplaced curios in delves, so you do not have to look for it on the buff bar.",
+        SHOW = "Show curio buff details",
+        LOCK = "Lock position",
+        LOCK_DESC = "When unlocked, a preview window appears even without the buff and can be dragged with the mouse.\nLock it again after positioning so it does not catch mouse clicks.",
+        FONT_SIZE = "Font size",
+        BG_ALPHA = "Background opacity",
+        RESET_POS = "Reset position",
+        RESET_POS_DESC = "Moves the curio buff window back to the upper center of the screen.",
+        PREVIEW = "(Preview, drag to move)",
+        SAMPLE = "The buff details will be shown here once you get the buff.",
+        BUFF_FALLBACK = "Curio buff",
+    },
+}
+
+local function CT(key)
+    local code = addon.GetDisplayLocale and addon.GetDisplayLocale()
+    local set = CURIO_TEXT[code] or CURIO_TEXT.enUS
+    return set[key] or CURIO_TEXT.enUS[key] or key
+end
+
+-- 진귀품 버프 이름 (게임에서 읽는다, 실패 시 기본 문구)
+local function GetCurioSpellName()
+    local ok, name = pcall(function()
+        return C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(CURIO_BUFF_SPELL_ID)
+    end)
+    if ok and type(name) == "string" and name ~= "" then return name end
+    return CT("BUFF_FALLBACK")
+end
+
 -- 지역/구렁 목록은 DB.lua에 있다 (언어와 무관한 데이터)
 local ZoneList = addon.ZoneList
 local DelveList = addon.DelveList
@@ -147,6 +202,10 @@ local function InitializeDB(forceReset)
     if HoneyDelveDB.AutoDelveBot == nil then HoneyDelveDB.AutoDelveBot = true end
     if HoneyDelveDB.AutoDelveBotRequireBountiful == nil then HoneyDelveDB.AutoDelveBotRequireBountiful = true end
     if HoneyDelveDB.ShowDundunKeyHint == nil then HoneyDelveDB.ShowDundunKeyHint = true end
+    if HoneyDelveDB.ShowCurioBuff == nil then HoneyDelveDB.ShowCurioBuff = true end
+    if HoneyDelveDB.CurioBuffLocked == nil then HoneyDelveDB.CurioBuffLocked = true end
+    if HoneyDelveDB.CurioFontSize == nil then HoneyDelveDB.CurioFontSize = 12 end
+    if HoneyDelveDB.CurioAlpha == nil then HoneyDelveDB.CurioAlpha = 0.6 end
 
     local addedCount = 0
     for id in pairs(addon.DefaultData) do
@@ -266,7 +325,7 @@ local function BuildOptions()
                     -- 저장 값은 HoneyDelveDB.LocaleOverride (nil = 자동)
                     -- 대부분의 사용자에게는 필요 없는 설정이라 맨 아래(데이터 관리 다음)에 둔다.
                     languageGroup = {
-                        type = "group", name = L.OPT_LANGUAGE_GROUP, order = 12, inline = true,
+                        type = "group", name = L.OPT_LANGUAGE_GROUP, order = 13, inline = true,
                         args = {
                             languageDesc = {
                                 type = "description",
@@ -488,8 +547,63 @@ local function BuildOptions()
                             },
                         },
                     },
+                    -- 잘못 놓여진 진귀품 버프 내용 표시 창
+                    curioGroup = {
+                        type = "group", name = CT("GROUP"), order = 9, inline = true,
+                        args = {
+                            curioDesc = {
+                                type = "description",
+                                name = function() return "|cffaaaaaa" .. CT("DESC"):format(GetCurioSpellName()) .. "|r" end,
+                                order = 1, fontSize = "medium", width = "full",
+                            },
+                            showCurioBuff = {
+                                type = "toggle", name = CT("SHOW"), order = 2, width = "full",
+                                get = function() return HoneyDelveDB.ShowCurioBuff end,
+                                set = function(_, val)
+                                    HoneyDelveDB.ShowCurioBuff = val
+                                    HDT:UpdateCurioBuff()
+                                end,
+                            },
+                            curioLocked = {
+                                type = "toggle", name = CT("LOCK"), order = 3, width = "full",
+                                desc = CT("LOCK_DESC"),
+                                disabled = function() return not HoneyDelveDB.ShowCurioBuff end,
+                                get = function() return HoneyDelveDB.CurioBuffLocked end,
+                                set = function(_, val)
+                                    HoneyDelveDB.CurioBuffLocked = val
+                                    HDT:UpdateCurioBuff()
+                                end,
+                            },
+                            curioFontSize = {
+                                type = "range", name = CT("FONT_SIZE"), order = 4, width = 1.5,
+                                min = 10, max = 16, step = 1,
+                                disabled = function() return not HoneyDelveDB.ShowCurioBuff end,
+                                get = function() return HoneyDelveDB.CurioFontSize end,
+                                set = function(_, val)
+                                    HoneyDelveDB.CurioFontSize = val
+                                    HDT:UpdateCurioBuff()
+                                end,
+                            },
+                            curioAlpha = {
+                                type = "range", name = CT("BG_ALPHA"), order = 5, width = 1.5,
+                                min = 0, max = 1, step = 0.05,
+                                disabled = function() return not HoneyDelveDB.ShowCurioBuff end,
+                                get = function() return HoneyDelveDB.CurioAlpha end,
+                                set = function(_, val)
+                                    HoneyDelveDB.CurioAlpha = val
+                                    HDT:UpdateCurioBuff()
+                                end,
+                            },
+                            curioResetPos = {
+                                type = "execute", name = CT("RESET_POS"), order = 6, width = 1.2,
+                                desc = CT("RESET_POS_DESC"),
+                                disabled = function() return not HoneyDelveDB.ShowCurioBuff end,
+                                func = function() HDT:ResetCurioPosition() end,
+                            },
+                        },
+                    },
                     layoutGroup = {
-                        type = "group", name = L.OPT_LAYOUT_GROUP, order = 9, inline = true,
+                        type = "group", name = L.OPT_LAYOUT_GROUP, order = 10, inline = true,
                         args = {
                             bgAlpha = {
                                 type = "range", name = L.OPT_BG_ALPHA, order = 1, width = "full",
@@ -514,7 +628,7 @@ local function BuildOptions()
                         },
                     },
                     keybindsGroup = {
-                        type = "group", name = L.OPT_KEYBIND_GROUP, order = 10, inline = true,
+                        type = "group", name = L.OPT_KEYBIND_GROUP, order = 11, inline = true,
                         args = {
                             bindDashboard = {
                                 type = "keybinding", name = L.BINDING_DASHBOARD, order = 1, width = 1.5,
@@ -539,7 +653,7 @@ local function BuildOptions()
                         },
                     },
                     resetGroup = {
-                        type = "group", name = L.OPT_DATA_GROUP, order = 11, inline = true,
+                        type = "group", name = L.OPT_DATA_GROUP, order = 12, inline = true,
                         args = {
                             resetDesc = {
                                 type = "description",
@@ -706,6 +820,266 @@ function HDT:UpdateGraceAlert()
         graceAlert:Hide()
     end
 end
+
+-- =========================================================
+-- 잘못 놓여진 진귀품 버프 내용 표시 창
+-- 버프(주문 ID 1280098)가 걸려 있으면 버프 툴팁의 설명 글자를 그대로 읽어 화면에 띄운다.
+--   1. C_UnitAuras.GetPlayerAuraBySpellID로 버프를 찾는다.
+--   2. C_TooltipInfo.GetUnitBuffByAuraInstanceID로 버프 툴팁 데이터를 받아
+--      첫 줄(버프 이름)을 뺀 나머지 줄을 표시한다. (언어와 무관하게 게임이 주는 글자 그대로)
+--   툴팁 데이터는 다른 애드온이 GameTooltip에 덧붙인 줄(SpellID, IconID 등)을 포함하지 않는다.
+-- 위치 잠금을 풀면 버프가 없어도 미리보기로 나타나며 드래그로 옮길 수 있다.
+-- 잠그면 마우스 클릭을 통과시킨다.
+--
+-- 구렁 안이나 전투 중에는 버프 정보가 보안값(secret value)으로 올 가능성이 있다. (12.x 제한, 인게임 확인 필요)
+--   보안값 글자는 가공(줄 나누기, 이어 붙이기)하지 않고 글자 칸에 그대로 넣는다.
+--   전투 중에 버프를 못 찾으면 조회가 막힌 것일 수 있으므로 표시를 유지하고 전투가 끝난 뒤 다시 확인한다.
+-- =========================================================
+local CURIO_PAD = 8                -- 창 안쪽 여백
+local CURIO_ICON_SIZE = 20         -- 제목 줄 아이콘 크기
+local CURIO_ICON_GAP = 6           -- 아이콘과 제목 사이 간격
+local CURIO_TITLE_GAP = 4          -- 제목 줄과 설명 첫 줄 사이 간격
+local CURIO_SECRET_WIDTH = 220     -- 보안값 글자라 너비를 잴 수 없을 때 쓰는 창 너비
+local CURIO_SECRET_LINES = 9       -- 보안값 글자라 높이를 잴 수 없을 때 가정하는 줄 수
+local CURIO_DEFAULT_POS = { "CENTER", "CENTER", 0, 200 }
+local CURIO_RETRY_MAX = 5          -- 버프는 있는데 설명을 못 읽었을 때 재시도 횟수
+
+local function IsSecret(value)
+    return issecretvalue ~= nil and issecretvalue(value) == true
+end
+
+-- 함수 결과가 일반 숫자면 그 값을, 오류나 보안값이면 대체값을 반환한다.
+local function SafeNumber(fn, fallback)
+    local ok, value = pcall(fn)
+    if ok and type(value) == "number" and not IsSecret(value) then return value end
+    return fallback
+end
+
+local function GetCurioIcon()
+    local ok, tex = pcall(function()
+        return C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(CURIO_BUFF_SPELL_ID)
+    end)
+    if ok and not IsSecret(tex) and tex then return tex end
+    return CURIO_BUFF_ICON_FALLBACK
+end
+
+local curioFrame = CreateFrame("Frame", "HoneyDelveTodayCurioFrame", UIParent)
+curioFrame:SetSize(200, 60)
+curioFrame:SetFrameStrata("MEDIUM")
+curioFrame:SetFrameLevel(50)
+curioFrame:SetClampedToScreen(true)
+curioFrame:SetMovable(true)
+curioFrame:EnableMouse(false)
+curioFrame:Hide()
+curioFrame.isPreview = false
+curioFrame.lines = {}
+
+curioFrame.bg = curioFrame:CreateTexture(nil, "BACKGROUND")
+curioFrame.bg:SetAllPoints(curioFrame)
+curioFrame.bg:SetColorTexture(0, 0, 0, 0.6)
+
+curioFrame.icon = curioFrame:CreateTexture(nil, "ARTWORK")
+curioFrame.icon:SetSize(CURIO_ICON_SIZE, CURIO_ICON_SIZE)
+curioFrame.icon:SetPoint("TOPLEFT", curioFrame, "TOPLEFT", CURIO_PAD, -CURIO_PAD)
+
+curioFrame.title = curioFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+curioFrame.title:SetPoint("LEFT", curioFrame.icon, "RIGHT", CURIO_ICON_GAP, 0)
+curioFrame.title:SetJustifyH("LEFT")
+curioFrame.title:SetWordWrap(false)
+
+-- 드래그 핸들: 잠금을 풀었을 때만 마우스를 받는다 (잠금 상태에서는 클릭이 아래로 통과)
+local curioDrag = CreateFrame("Frame", nil, curioFrame)
+curioDrag:SetAllPoints(curioFrame)
+curioDrag:EnableMouse(false)
+curioDrag:RegisterForDrag("LeftButton")
+curioDrag:SetScript("OnDragStart", function()
+    if HoneyDelveDB and not HoneyDelveDB.CurioBuffLocked then
+        curioFrame:StartMoving()
+    end
+end)
+curioDrag:SetScript("OnDragStop", function()
+    curioFrame:StopMovingOrSizing()
+    local point, _, relativePoint, xOfs, yOfs = curioFrame:GetPoint()
+    HoneyDelveDB.CurioBuffPos = { point, relativePoint, xOfs, yOfs }
+end)
+
+local function ApplyCurioPosition()
+    local p = HoneyDelveDB.CurioBuffPos or CURIO_DEFAULT_POS
+    curioFrame:ClearAllPoints()
+    curioFrame:SetPoint(p[1], UIParent, p[2], p[3], p[4])
+end
+
+-- 진귀품 버프 찾기 (없거나 조회 실패 시 nil)
+local function GetCurioAura()
+    if not (C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID) then return nil end
+    local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, CURIO_BUFF_SPELL_ID)
+    if ok and type(aura) == "table" then return aura end
+    return nil
+end
+
+-- 버프 툴팁에서 설명 줄 목록을 읽는다.
+-- 반환값: 줄 목록, 보안값 포함 여부 / 읽을 줄이 없으면 nil
+-- 일반 글자는 줄바꿈 기준으로 나누고 빈 줄은 뺀다. 보안값 글자는 나누지 않고 한 칸에 그대로 둔다.
+local function ReadCurioLines(aura)
+    if not (C_TooltipInfo and C_TooltipInfo.GetUnitBuffByAuraInstanceID) then return nil end
+    local ok, result, hasSecret = pcall(function()
+        local data = C_TooltipInfo.GetUnitBuffByAuraInstanceID("player", aura.auraInstanceID)
+        if type(data) ~= "table" or type(data.lines) ~= "table" then return nil, false end
+        local lines = {}
+        local secret = false
+        for i = 2, #data.lines do
+            local text = data.lines[i] and data.lines[i].leftText
+            if IsSecret(text) then
+                secret = true
+                lines[#lines + 1] = text
+            elseif type(text) == "string" then
+                for part in text:gmatch("[^\r\n]+") do
+                    if part:match("%S") then lines[#lines + 1] = part end
+                end
+            end
+        end
+        if #lines == 0 then return nil, false end
+        return lines, secret
+    end)
+    if ok and result then return result, hasSecret end
+    return nil
+end
+
+local function GetCurioLineFont(index)
+    local fs = curioFrame.lines[index]
+    if not fs then
+        fs = curioFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        fs:SetJustifyH("LEFT")
+        fs:SetJustifyV("TOP")
+        curioFrame.lines[index] = fs
+    end
+    return fs
+end
+
+-- 창 내용을 그리고 크기를 내용에 맞춘다.
+-- lines: 설명 줄 목록, isPreview: 위치 조정용 미리보기 여부
+local function RenderCurio(lines, isPreview)
+    local fontPath, _, fontFlags = GameFontNormal:GetFont()
+    local fontSize = HoneyDelveDB.CurioFontSize or 12
+    local lineHeight = fontSize + 2
+
+    curioFrame.bg:SetColorTexture(0, 0, 0, HoneyDelveDB.CurioAlpha or 0.6)
+    curioFrame.icon:SetTexture(GetCurioIcon())
+
+    local titleText = "|cffffd100" .. GetCurioSpellName() .. "|r"
+    if isPreview then
+        titleText = titleText .. " |cffaaaaaa" .. CT("PREVIEW") .. "|r"
+    end
+    curioFrame.title:SetFont(fontPath, fontSize + 1, fontFlags)
+    curioFrame.title:SetText(titleText)
+
+    local maxWidth = CURIO_ICON_SIZE + CURIO_ICON_GAP
+        + SafeNumber(function() return curioFrame.title:GetStringWidth() end, 100)
+    local y = CURIO_PAD + CURIO_ICON_SIZE + CURIO_TITLE_GAP
+
+    for i, text in ipairs(lines) do
+        local fs = GetCurioLineFont(i)
+        fs:SetFont(fontPath, fontSize, fontFlags)
+        fs:SetTextColor(1, 1, 1)
+        fs:SetText(text)
+        fs:ClearAllPoints()
+        fs:SetPoint("TOPLEFT", curioFrame, "TOPLEFT", CURIO_PAD, -y)
+        fs:Show()
+        local width, height
+        if IsSecret(text) then
+            width = SafeNumber(function() return fs:GetStringWidth() end, CURIO_SECRET_WIDTH)
+            height = SafeNumber(function() return fs:GetStringHeight() end, lineHeight * CURIO_SECRET_LINES)
+        else
+            width = SafeNumber(function() return fs:GetStringWidth() end, CURIO_SECRET_WIDTH)
+            height = lineHeight
+        end
+        if width > maxWidth then maxWidth = width end
+        y = y + height
+    end
+
+    -- 이번에 쓰지 않은 줄은 숨김
+    for i = #lines + 1, #curioFrame.lines do
+        curioFrame.lines[i]:Hide()
+    end
+
+    curioFrame:SetSize(maxWidth + CURIO_PAD * 2, y + CURIO_PAD)
+end
+
+local function ShowCurioPreview()
+    local cache = HoneyDelveDB.CurioBuffCache
+    local lines = (type(cache) == "table" and #cache > 0) and cache or { CT("SAMPLE") }
+    RenderCurio(lines, true)
+    curioFrame.isPreview = true
+    curioFrame:Show()
+end
+
+local curioRetryCount = 0
+local curioUpdatePending = false
+
+function HDT:UpdateCurioBuff()
+    if not HoneyDelveDB then return end
+    curioDrag:EnableMouse(not HoneyDelveDB.CurioBuffLocked)
+
+    if not HoneyDelveDB.ShowCurioBuff then
+        curioFrame:Hide()
+        return
+    end
+
+    local aura = GetCurioAura()
+    if aura then
+        local lines, hasSecret = ReadCurioLines(aura)
+        if lines then
+            curioRetryCount = 0
+            -- 보안값이 섞이지 않은 경우에만 저장 (미리보기에 사용)
+            if not hasSecret then HoneyDelveDB.CurioBuffCache = lines end
+            RenderCurio(lines, false)
+            curioFrame.isPreview = false
+            curioFrame:Show()
+            return
+        end
+        -- 버프는 있는데 설명을 아직 못 읽은 경우 (툴팁 데이터 로드 전 등): 잠시 후 다시 시도
+        if curioRetryCount < CURIO_RETRY_MAX then
+            curioRetryCount = curioRetryCount + 1
+            C_Timer.After(0.5, function() HDT:UpdateCurioBuff() end)
+        end
+        if curioFrame:IsShown() and not curioFrame.isPreview then return end
+        RenderCurio({ "..." }, false)
+        curioFrame.isPreview = false
+        curioFrame:Show()
+        return
+    end
+
+    curioRetryCount = 0
+    -- 전투 중에 버프를 못 찾으면 조회가 막힌 것일 수 있으므로 지금 표시를 유지한다 (전투 종료 후 다시 확인)
+    if InCombatLockdown() and curioFrame:IsShown() and not curioFrame.isPreview then
+        return
+    end
+
+    if not HoneyDelveDB.CurioBuffLocked then
+        ShowCurioPreview()
+    else
+        curioFrame:Hide()
+    end
+end
+
+function HDT:ResetCurioPosition()
+    HoneyDelveDB.CurioBuffPos = nil
+    ApplyCurioPosition()
+end
+
+-- 버프 변동(UNIT_AURA)은 자주 발생하므로 0.2초에 한 번만 갱신한다.
+local function ScheduleCurioUpdate()
+    if curioUpdatePending then return end
+    curioUpdatePending = true
+    C_Timer.After(0.2, function()
+        curioUpdatePending = false
+        HDT:UpdateCurioBuff()
+    end)
+end
+
+-- 플레이어 버프 변동만 받기 위해 별도 프레임에서 RegisterUnitEvent를 쓴다. (등록은 OnInitialize에서)
+local curioEventFrame = CreateFrame("Frame")
+curioEventFrame:SetScript("OnEvent", function() ScheduleCurioUpdate() end)
 
 local f = CreateFrame("Frame", "HoneyDelveTodayFrame", UIParent)
 f:SetSize(360, 640)
@@ -2093,6 +2467,10 @@ function HDT:OnInitialize()
     else
         graceAlert:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     end
+    -- 진귀품 버프 창 위치 복원 (없으면 기본 위치) 및 플레이어 버프 변동 이벤트 등록
+    ApplyCurioPosition()
+    curioEventFrame:RegisterUnitEvent("UNIT_AURA", "player")
+    self:RegisterEvent("PLAYER_REGEN_ENABLED")
     self:RegisterEvent("BAG_UPDATE")
     self:RegisterEvent("PLAYER_ENTERING_WORLD")
     self:RegisterEvent("ZONE_CHANGED_NEW_AREA")
@@ -2131,6 +2509,11 @@ function HDT:CURRENCY_DISPLAY_UPDATE()
     if dundunKeyHint and dundunKeyHint:IsShown() then HDT:UpdateDundunKeyHint() end
 end
 
+-- 전투 중에 유지해 둔 진귀품 버프 표시를 전투가 끝나면 다시 확인
+function HDT:PLAYER_REGEN_ENABLED()
+    HDT:UpdateCurioBuff()
+end
+
 function HDT:PLAYER_ENTERING_WORLD()
     graceAlert.closedByUser = false
     -- 순간이동 로딩 중 GOSSIP_CLOSED가 누락되어도 다음 구렁로봇 대화가 막히지 않도록 초기화
@@ -2142,9 +2525,12 @@ function HDT:PLAYER_ENTERING_WORLD()
     for _, zone in ipairs(ZoneList) do
         C_TaskQuest.GetQuestsOnMap(zone.mapID)
     end
+    -- 로딩 화면 직후(구렁 입장/퇴장 등) 진귀품 버프 표시를 바로 맞춘다
+    HDT:UpdateCurioBuff()
     C_Timer.After(1, function()
         HDT:RefreshWQCache()
         HDT:RefreshNameCache()
+        HDT:UpdateCurioBuff()
     end)
 end
 
