@@ -1,0 +1,8 @@
+<Bindings>
+	<Binding name="HONEYDELVETODAY_DASHBOARD" category="BINDING_HEADER_HONEYDELVETODAY">
+		HoneyDelveTodayFrame_Toggle()
+	</Binding>
+	<Binding name="HONEYDELVETODAY_CONFIG" category="BINDING_HEADER_HONEYDELVETODAY">
+		HoneyDelveTodayConfig_Toggle()
+	</Binding>
+</Bindings>
