@@ -20,8 +20,15 @@ local GILDED_STASH_SPELL_ID = 7591
 -- 신화 안개문장(12.1) 화폐 ID. 아이콘은 이 화폐 정보에서 가져온다. (12.0 신화 여명문장 아이콘 7639523은 대체됨)
 local MYTH_CREST_CURRENCY_ID = 3446
 local MYTH_CREST_ICON_FALLBACK = "Interface\\Icons\\Inv_121_crest_myth"
+-- 보물 추적자의 은혜 주간 퀘스트: 은혜를 "획득"하는 순간 완료된다. (인게임 dump로 확인: 미사용 보유 상태에서 true)
+-- 은혜 사용이나 숨겨진 상자 보상 수령과는 관계가 없다.
 local BOUNTY_QUEST_ID = 86371
 local BOUNTY_ITEM_ID = 274374 -- 보물 추적자의 은혜 (12.1 기준 ID, 12.0 기준 ID는 252415)
+-- 보물 추적자의 은혜 버프: 은혜 아이템을 사용하면 생기고, 구렁을 완료한 뒤 숨겨진 상자를 열면 사라진다. (인게임 확인)
+-- 재접속해도 유지되고 주간 리셋을 넘겨도 남는다. 리셋 후 새 주차에 상자를 열면 그 주의 보상으로 받는다.
+-- 구렁 안에서도 C_UnitAuras.GetPlayerAuraBySpellID로 정상 조회된다. (2026-10-12 인게임 dump로 확인)
+local BOUNTY_BUFF_SPELL_ID = 1293799
+local GRACE_CLAIM_RECHECK_DELAY = 2 -- 버프가 사라졌을 때 일시적인 조회 누락(로딩 등)을 거르기 위한 재확인 대기 시간(초)
 local DUNDUN_SHARD_CURRENCY_ID = 3376 -- 둔둔의 조각 (넘칠듯한 풍요로움 아이콘용, 12.1 인게임 확인)
 local ABUNDANCE_QUEST_ID = 97064 -- 넘칠듯한 풍요로움: 주 1회 둔둔 클릭 시 완료되는 퀘스트 (WeeklyRewards 애드온 delve-abundance 항목 참고)
 -- 정순한 마나 수정: 11레벨 풍요로운 구렁 완료 시 획득, 자흐란에게 영웅템 구매용 (주간 상한 250, 보유 상한 1000, 인게임 툴팁으로 ID 확인)
@@ -206,6 +213,9 @@ local function InitializeDB(forceReset)
     if HoneyDelveDB.CurioBuffLocked == nil then HoneyDelveDB.CurioBuffLocked = true end
     if HoneyDelveDB.CurioFontSize == nil then HoneyDelveDB.CurioFontSize = 12 end
     if HoneyDelveDB.CurioAlpha == nil then HoneyDelveDB.CurioAlpha = 0.6 end
+    -- 캐릭터별 이번 주 숨겨진 상자 보상 수령 기록: [캐릭터명-서버명] = 다음 주간 리셋 시각(서버 시간, 초)
+    -- 등급/메모 초기화 버튼(forceReset)과 무관하게 유지한다.
+    HoneyDelveDB.GraceClaimed = HoneyDelveDB.GraceClaimed or {}
 
     local addedCount = 0
     for id in pairs(addon.DefaultData) do
@@ -284,10 +294,78 @@ local function GetItemCountSafe(itemID)
     return 0
 end
 
+-- =========================================================
+-- 보물 추적자의 은혜 주간 보상 판정
+-- 영웅템 기회는 주 1회이며, 제한되는 것은 은혜 "사용"이 아니라 숨겨진 상자 "보상 수령"이다.
+-- 주간 퀘스트(86371)는 은혜를 획득하는 순간 완료되고,
+-- 숨겨진 상자를 열 때 새로 완료되는 퀘스트나 바뀌는 숨겨진 화폐는 없다. (2026-10-11 인게임 비교로 확인)
+-- 그래서 은혜 버프가 "있음에서 없음"으로 바뀌는 순간(= 숨겨진 상자를 연 순간)을 보상 수령으로 보고,
+-- 캐릭터별로 다음 주간 리셋 시각까지 기록한다. (HoneyDelveDB.GraceClaimed)
+-- 한계: 애드온이 그 순간을 보지 못한 경우(애드온 비활성 상태, 다른 PC에서 플레이)는 기록되지 않는다.
+-- =========================================================
+local function GetCharKey()
+    local name = UnitName("player") or "Unknown"
+    local realm = (GetNormalizedRealmName and GetNormalizedRealmName()) or GetRealmName() or ""
+    return name .. "-" .. realm
+end
+
+-- 이번 주 숨겨진 상자 보상을 이미 받았는지 확인 (애드온 기록 기준)
+-- 저장된 만료 시각(다음 주간 리셋)이 지났으면 기록을 지우고 false를 반환한다.
+local function IsGraceClaimedThisWeek()
+    local claimed = HoneyDelveDB and HoneyDelveDB.GraceClaimed
+    if not claimed then return false end
+    local key = GetCharKey()
+    local expireAt = claimed[key]
+    if not expireAt then return false end
+    if GetServerTime() >= expireAt then
+        claimed[key] = nil
+        return false
+    end
+    return true
+end
+
+-- 이번 주 숨겨진 상자 보상 수령 기록 (다음 주간 리셋 시각까지 유효). 기록에 성공하면 true를 반환한다.
+local function MarkGraceClaimedThisWeek()
+    local claimed = HoneyDelveDB and HoneyDelveDB.GraceClaimed
+    if not claimed then return false end
+    if not (C_DateAndTime and C_DateAndTime.GetSecondsUntilWeeklyReset) then return false end
+    local secs = C_DateAndTime.GetSecondsUntilWeeklyReset()
+    if not secs or secs <= 0 then return false end
+    claimed[GetCharKey()] = GetServerTime() + secs
+    return true
+end
+
+-- 은혜 버프 보유 여부. 확인할 수 없으면 nil(알 수 없음)을 반환한다.
+-- 전투 중에는 오라 정보가 제한되어 버프가 있어도 없는 것처럼 조회되므로 확인하지 않는다.
+-- (2026-10-12 인게임 확인: 버프가 있는 캐릭터가 전투에 들어갈 때마다 버프가 사라진 것으로 판정되어
+--  보상 수령이 잘못 기록되었다)
+-- 보안값(secret value)으로 나오는 경우도 확인할 수 없는 것으로 처리한다.
+local function HasGraceBuff()
+    if InCombatLockdown() or UnitAffectingCombat("player") then return nil end
+    if not (C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID) then return nil end
+    local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, BOUNTY_BUFF_SPELL_ID)
+    if not ok then return nil end
+    if issecretvalue and issecretvalue(aura) then return nil end
+    return aura ~= nil
+end
+
+-- 마지막으로 확인한 은혜 버프 상태 (nil: 아직 확인하지 못함)
+-- 전투 중처럼 버프를 확인할 수 없을 때 대시보드와 알림은 이 값을 대신 쓴다.
+local graceLastHasBuff = nil
+
+-- 반환값
+-- bountyGet: 이번 주 은혜 획득 여부 (주간 퀘스트 86371)
+-- hasItem: 은혜 아이템 보유 여부 (가방 + 은행)
+-- hasBuff: 은혜 버프 보유 여부 (은혜를 사용했고 아직 숨겨진 상자를 열지 않은 상태)
+--          지금 확인할 수 없으면(전투 중 등) 마지막으로 확인한 값을 쓴다.
+-- claimed: 이번 주 숨겨진 상자 보상 수령 여부 (애드온 기록)
 local function GetBountyState()
     local bountyGet = C_QuestLog.IsQuestFlaggedCompleted(BOUNTY_QUEST_ID)
     local hasItem = GetItemCountSafe(BOUNTY_ITEM_ID) > 0
-    return bountyGet, hasItem
+    local hasBuff = HasGraceBuff()
+    if hasBuff == nil then hasBuff = (graceLastHasBuff == true) end
+    local claimed = IsGraceClaimedThisWeek()
+    return bountyGet, hasItem, hasBuff, claimed
 end
 
 local function GetAbundanceState()
@@ -757,8 +835,9 @@ end
 -- graceAlert 자체는 EnableMouse(false)로 마우스 이벤트를 통과시킵니다.
 -- 드래그는 별도 dragHandle 프레임으로, 닫기는 UIPanelCloseButton으로 분리해
 -- Hide() 후에도 해당 영역 클릭이 가로채지는 버그를 방지합니다.
+local GRACE_ALERT_MIN_WIDTH = 260
 local graceAlert = CreateFrame("Frame", "HoneyDelveTodayGraceAlert", UIParent)
-graceAlert:SetSize(260, 60)
+graceAlert:SetSize(GRACE_ALERT_MIN_WIDTH, 60)
 graceAlert:SetFrameStrata("HIGH")
 graceAlert:SetFrameLevel(200)
 graceAlert:EnableMouse(false)
@@ -800,21 +879,39 @@ graceAlertClose:SetScript("OnClick", function()
     graceAlert:Hide()
 end)
 
+-- 구렁(scenario) 안에서 표시하는 알림
+-- 1. 은혜 버프 있음 + 이번 주 보상 이미 받음: 리셋 전에 숨겨진 상자를 열면 은혜가 보상 없이 사라지므로 경고 (주황색)
+-- 2. 은혜 버프 없음 + 은혜 아이템 보유 + 이번 주 보상 미수령: 은혜 사용 알림 (노란색)
+-- 은혜 버프가 있고 이번 주 보상을 아직 받지 않았다면 알림을 띄우지 않는다. (상자를 열면 정상 보상)
+-- 이번 주 보상을 이미 받은 캐릭터가 추가로 얻은 은혜는 써도 보상이 없으므로 사용 알림을 띄우지 않는다.
 function HDT:UpdateGraceAlert()
     -- 90레벨 미만 캐릭터에는 알림 미표시
     if UnitLevel("player") < 90 then
         graceAlert:Hide()
         return
     end
-    local _, hasItem = GetBountyState()
+    local _, hasItem, hasBuff, claimed = GetBountyState()
     local _, instanceType = IsInInstance()
-    -- 설정 ON + 아이템 보유 중 + 구렁(scenario) 내부 + 유저가 직접 닫지 않은 경우
+
+    local alertText = nil
+    if hasBuff then
+        if claimed then
+            alertText = "|cffff8000" .. L.GRACE_ALERT_WAIT .. "|r"
+        end
+    elseif hasItem and not claimed then
+        alertText = "|cffffff00" .. L.GRACE_ALERT:format(addon.GetName("Grace")) .. "|r"
+    end
+
+    -- 설정 ON + 표시할 알림이 있음 + 구렁(scenario) 내부 + 유저가 직접 닫지 않은 경우
     if HoneyDelveDB.ShowGraceAlert
-        and hasItem
+        and alertText
         and instanceType == "scenario"
         and not graceAlert.closedByUser
     then
-        graceAlertText:SetText("|cffffff00" .. L.GRACE_ALERT:format(addon.GetName("Grace")) .. "|r")
+        graceAlertText:SetText(alertText)
+        -- 문구 길이에 맞춰 알림창 너비 조정 (아이콘 왼쪽 여백 12 + 아이콘 36 + 간격 10 + 글자 + 닫기 버튼 영역 28)
+        local textWidth = graceAlertText:GetStringWidth() or 0
+        graceAlert:SetWidth(math.max(GRACE_ALERT_MIN_WIDTH, 12 + 36 + 10 + textWidth + 28))
         graceAlert:Show()
     else
         graceAlert:Hide()
@@ -1704,6 +1801,12 @@ local DELVE_ICON_GAP = 4      -- 구렁 풍요 아이콘과 구렁 이름 사이
 local HEADER_ITEM_GAP = 8     -- 지역 헤더 보상 항목 사이 간격
 local STATUS_LABEL_GAP = 4    -- "보물 추적자의 은혜" 같은 이름과 상태 아이콘 사이 간격
 
+-- 상태 아이콘
+local STATUS_ICON_READY = "Interface\\RaidFrame\\ReadyCheck-Ready"
+local STATUS_ICON_NOT_READY = "Interface\\RaidFrame\\ReadyCheck-NotReady"
+local STATUS_ICON_WAITING = "Interface\\RaidFrame\\ReadyCheck-Waiting"
+local STATUS_ICON_ALERT = "Interface\\DialogFrame\\UI-Dialog-Icon-AlertNew"
+
 -- 상태 줄(이름 + 상태 아이콘 + 상태 글자) 추가
 local function AddStatusRow(spec, iconTex, iconIsAtlas, label, statusIcon, statusText)
     local row = NewRow(spec)
@@ -1712,6 +1815,34 @@ local function AddStatusRow(spec, iconTex, iconIsAtlas, label, statusIcon, statu
     AddGap(row, STATUS_LABEL_GAP)
     AddIcon(row, statusIcon, ICON_SIZE_STATUS)
     AddText(row, statusText)
+end
+
+-- 보물 추적자의 은혜 줄 추가 (위에서부터 우선 적용)
+-- 1. 버프 있음 + 이번 주 보상 받음: 사용완료 (숨겨진 상자는 리셋 후 열기) - 리셋 전에 열면 은혜가 그냥 사라짐
+-- 2. 버프 있음 + 이번 주 보상 미수령: 사용 중 (숨겨진 상자를 열면 보상) - 지난 주에서 넘어온 버프도 여기에 해당
+-- 3. 아이템 보유 + 이번 주 보상 받음: 사용완료 (+1 보유, 다음 주 사용)
+-- 4. 아이템 보유 + 이번 주 보상 미수령: 미사용
+-- 5. 이번 주 은혜 획득(86371) 또는 이번 주 보상 받음: 사용완료
+-- 6. 그 외: 미획득
+local function AddGraceRow(spec)
+    local bountyGet, hasItem, hasBuff, claimed = GetBountyState()
+    local label = "|cffffffff" .. addon.GetName("Grace") .. "|r"
+    if hasBuff and claimed then
+        AddStatusRow(spec, 1064187, false, label, STATUS_ICON_ALERT,
+            "|cff00ff00" .. L.STATUS_USED .. "|r |cffff8000" .. L.NOTE_OPEN_AFTER_RESET .. "|r")
+    elseif hasBuff then
+        AddStatusRow(spec, 1064187, false, label, STATUS_ICON_WAITING,
+            "|cff66ccff" .. L.STATUS_ACTIVE .. "|r |cffaaaaaa" .. L.NOTE_OPEN_CHEST .. "|r")
+    elseif hasItem and claimed then
+        AddStatusRow(spec, 1064187, false, label, STATUS_ICON_READY,
+            "|cff00ff00" .. L.STATUS_USED .. "|r |cffaaaaaa" .. L.NOTE_EXTRA_NEXT_WEEK .. "|r")
+    elseif hasItem then
+        AddStatusRow(spec, 1064187, false, label, STATUS_ICON_ALERT, "|cffffff00" .. L.STATUS_UNUSED .. "|r")
+    elseif bountyGet or claimed then
+        AddStatusRow(spec, 1064187, false, label, STATUS_ICON_READY, "|cff00ff00" .. L.STATUS_USED .. "|r")
+    else
+        AddStatusRow(spec, 1064187, false, label, STATUS_ICON_NOT_READY, "|cffff0000" .. L.STATUS_NOT_OBTAINED .. "|r")
+    end
 end
 
 -- 지역 헤더 보상 항목(간격 + 아이콘 + 글자) 추가
@@ -1830,15 +1961,7 @@ function HDT:UpdateDisplay()
         AddManaCrystalRow(spec)
     end
     if HoneyDelveDB.ShowGraceLine then
-        local bountyGet, hasItem = GetBountyState()
-        local label = "|cffffffff" .. addon.GetName("Grace") .. "|r"
-        if hasItem then
-            AddStatusRow(spec, 1064187, false, label, "Interface\\DialogFrame\\UI-Dialog-Icon-AlertNew", "|cffffff00" .. L.STATUS_UNUSED .. "|r")
-        elseif bountyGet then
-            AddStatusRow(spec, 1064187, false, label, "Interface\\RaidFrame\\ReadyCheck-Ready", "|cff00ff00" .. L.STATUS_USED .. "|r")
-        else
-            AddStatusRow(spec, 1064187, false, label, "Interface\\RaidFrame\\ReadyCheck-NotReady", "|cffff0000" .. L.STATUS_NOT_OBTAINED .. "|r")
-        end
+        AddGraceRow(spec)
     end
     if HoneyDelveDB.ShowAbundance then
         local abundanceDone = GetAbundanceState()
@@ -1850,9 +1973,9 @@ function HDT:UpdateDisplay()
             aIcon, aIsAtlas = "delves-bountiful", true
         end
         if abundanceDone then
-            AddStatusRow(spec, aIcon, aIsAtlas, label, "Interface\\RaidFrame\\ReadyCheck-Ready", "|cff00ff00" .. L.STATUS_USED .. "|r")
+            AddStatusRow(spec, aIcon, aIsAtlas, label, STATUS_ICON_READY, "|cff00ff00" .. L.STATUS_USED .. "|r")
         else
-            AddStatusRow(spec, aIcon, aIsAtlas, label, "Interface\\RaidFrame\\ReadyCheck-NotReady", "|cffff0000" .. L.STATUS_UNUSED .. "|r")
+            AddStatusRow(spec, aIcon, aIsAtlas, label, STATUS_ICON_NOT_READY, "|cffff0000" .. L.STATUS_UNUSED .. "|r")
         end
     end
     if HoneyDelveDB.ShowGildedStashLine then
@@ -1937,6 +2060,72 @@ function HDT:UpdateDisplay()
 
     RenderRows(spec, fontSize)
 end
+
+-- =========================================================
+-- 보물 추적자의 은혜 변화 감지
+-- 버프: "있음에서 없음"으로 바뀌면(= 숨겨진 상자를 열면) 이번 주 보상 수령으로 기록한다.
+--   로딩 화면 등에서 버프 정보를 잠깐 못 읽는 경우를 거르기 위해 일정 시간 뒤 한 번 더 확인한 후 기록한다.
+--   버프를 확인할 수 없으면(nil, 전투 중 등) 기준값을 바꾸지 않고, 전투가 끝나면 다시 확인한다.
+--   숨겨진 상자는 구렁 안에만 있으므로 구렁(scenario) 안에서 사라졌을 때만 보상 수령으로 기록한다.
+--   구렁 밖에서 사라진 것으로 보이면 기준값만 바꾸고 기록하지 않는다.
+-- 아이템: "미보유에서 보유"로 바뀌었을 때 이번 주 보상을 이미 받은 캐릭터라면 다음 주에 쓰라고 1회 안내한다.
+-- 접속 직후에는 기준값이 없으므로(nil) 그 시점의 상태를 기준값으로만 저장한다.
+-- (graceLastHasBuff는 GetBountyState에서도 쓰므로 위쪽 HasGraceBuff 아래에 선언되어 있다)
+-- =========================================================
+local graceLastHasItem = nil
+local graceRecheckPending = false
+
+local function RefreshGraceViews()
+    HDT:UpdateGraceAlert()
+    if f:IsShown() then HDT:UpdateDisplay() end
+end
+
+local function IsInDelve()
+    local _, instanceType = IsInInstance()
+    return instanceType == "scenario"
+end
+
+local function TrackGraceBuff()
+    local hasBuff = HasGraceBuff()
+    if hasBuff == nil then return end
+
+    -- 있음 -> 없음: 재확인 후 구렁 안이면 보상 수령 기록
+    if graceLastHasBuff == true and hasBuff == false then
+        if graceRecheckPending then return end
+        graceRecheckPending = true
+        C_Timer.After(GRACE_CLAIM_RECHECK_DELAY, function()
+            graceRecheckPending = false
+            local stillHas = HasGraceBuff()
+            -- 재확인 시점에 확인할 수 없으면(전투 중 등) 기준값을 그대로 두고 다음 변화 때 다시 판정한다.
+            if stillHas == nil then return end
+            if stillHas == false and IsInDelve() and MarkGraceClaimedThisWeek() then
+                print("|cffffff00[HDT]|r " .. L.MSG_GRACE_CLAIMED:format(addon.GetName("Grace")))
+            end
+            graceLastHasBuff = stillHas
+            RefreshGraceViews()
+        end)
+        return
+    end
+
+    if hasBuff ~= graceLastHasBuff then
+        graceLastHasBuff = hasBuff
+        RefreshGraceViews()
+    end
+end
+
+local function TrackGraceItem()
+    local _, hasItem, _, claimed = GetBountyState()
+    if graceLastHasItem == false and hasItem and claimed then
+        print("|cffffff00[HDT]|r " .. L.MSG_GRACE_EXTRA:format(addon.GetName("Grace")))
+    end
+    graceLastHasItem = hasItem
+end
+
+-- 플레이어 오라 변화만 받는 전용 프레임 (OnInitialize에서 이벤트 등록)
+local graceAuraFrame = CreateFrame("Frame")
+graceAuraFrame:SetScript("OnEvent", function()
+    TrackGraceBuff()
+end)
 
 -- =========================================================
 -- 구렁로봇 7001 한밤 구렁 자동 선택
@@ -2479,6 +2668,10 @@ function HDT:OnInitialize()
     self:RegisterEvent("GOSSIP_SHOW")
     self:RegisterEvent("GOSSIP_CLOSED")
     self:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
+    -- 은혜 버프 변화 감지 (플레이어 오라만 받는다)
+    -- 전투 중에는 버프를 확인하지 않으므로 전투가 끝나면(PLAYER_REGEN_ENABLED) 다시 확인한다.
+    graceAuraFrame:RegisterUnitEvent("UNIT_AURA", "player")
+    graceAuraFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
     HDT:UpdateGraceAlert()
     -- 새 버전 업데이트로 항목이 추가된 경우 안내
     if addedCount > 0 then
@@ -2489,6 +2682,7 @@ function HDT:OnInitialize()
 end
 
 function HDT:BAG_UPDATE()
+    TrackGraceItem()
     HDT:UpdateGraceAlert()
     if f:IsShown() then HDT:UpdateDisplay() end
 end
@@ -2520,6 +2714,9 @@ function HDT:PLAYER_ENTERING_WORLD()
     delveBotHandled = false
     dundunChatNotified = false
     HideDundunKeyHint()
+    -- 은혜 아이템/버프 기준값 갱신 (접속 직후에는 이 시점의 상태가 기준값이 됨)
+    TrackGraceItem()
+    TrackGraceBuff()
     HDT:UpdateGraceAlert()
     -- 골드퀘 데이터 미리 로드 (첫 대시보드 오픈 시 빈 결과 방지)
     for _, zone in ipairs(ZoneList) do
