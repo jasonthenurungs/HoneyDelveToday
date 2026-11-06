@@ -3,7 +3,7 @@
 ## Notes: Today's delve story variants at a glance, with weekly delve trackers
 ## Notes-koKR: 오늘의 꿀구렁은 어디일까
 ## Author: Nurungs
-## Version: 2.0.1
+## Version: 2.0.2
 ## SavedVariables: HoneyDelveDB
 ## IconTexture: Interface/AddOns/HoneyDelveToday/icon
 

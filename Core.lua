@@ -163,6 +163,9 @@ local function MigrateDataV2()
     end
 end
 
+-- 이번 접속에서 구렁로봇 자동 선택을 기본 꺼짐으로 바꿨는지 (OnInitialize에서 채팅 안내용)
+local autoDelveBotTurnedOff = false
+
 -- InitializeDB는 기존 유저 데이터(사용자가 바꾼 등급/메모)를 보존한다.
 -- forceReset=true일 때만 사용자가 바꾼 값을 전부 지운다.
 -- 반환값: 이번 버전에서 새로 추가된 변형 개수(신규 버전 업데이트 안내용)
@@ -206,7 +209,14 @@ local function InitializeDB(forceReset)
     if HoneyDelveDB.ShowGildedStashLine == nil then HoneyDelveDB.ShowGildedStashLine = true end
     if HoneyDelveDB.ShowVaultWorldLine == nil then HoneyDelveDB.ShowVaultWorldLine = true end
     if HoneyDelveDB.ShowManaCrystalLine == nil then HoneyDelveDB.ShowManaCrystalLine = true end
-    if HoneyDelveDB.AutoDelveBot == nil then HoneyDelveDB.AutoDelveBot = true end
+    -- 구렁로봇 한밤 구렁 자동 선택은 2.0.2부터 기본 꺼짐 (미궁 등 다른 곳으로 가려는 사용자가 있어서)
+    -- 2.0.1 이하에서는 기본 켜짐으로 모두 저장되어 있으므로, 기존 사용자도 한 번만 끄고 채팅으로 안내한다.
+    -- 그 뒤에 사용자가 다시 켜면 AutoDelveBotDefaultOff 표시가 남아 있어 다시 끄지 않는다.
+    if not HoneyDelveDB.AutoDelveBotDefaultOff then
+        if HoneyDelveDB.AutoDelveBot and not isFresh then autoDelveBotTurnedOff = true end
+        HoneyDelveDB.AutoDelveBot = false
+        HoneyDelveDB.AutoDelveBotDefaultOff = true
+    end
     if HoneyDelveDB.AutoDelveBotRequireBountiful == nil then HoneyDelveDB.AutoDelveBotRequireBountiful = true end
     if HoneyDelveDB.ShowDundunKeyHint == nil then HoneyDelveDB.ShowDundunKeyHint = true end
     if HoneyDelveDB.ShowCurioBuff == nil then HoneyDelveDB.ShowCurioBuff = true end
@@ -2676,6 +2686,10 @@ function HDT:OnInitialize()
     -- 새 버전 업데이트로 항목이 추가된 경우 안내
     if addedCount > 0 then
         print("|cffffff00[HoneyDelveToday]|r " .. L.MSG_NEW_ENTRIES:format(addedCount))
+    end
+    -- 구렁로봇 자동 선택을 기본 꺼짐으로 바꾼 경우 1회 안내
+    if autoDelveBotTurnedOff then
+        print("|cffffff00[HoneyDelveToday]|r " .. L.MSG_DELVEBOT_DEFAULT_OFF)
     end
     -- 애드온 로드 시점부터 대시보드를 띄우기 전이라도 전역퀘 정보를 미리 채워둔다.
     C_Timer.After(1, function() HDT:RefreshWQCache() end)

@@ -119,6 +119,7 @@ addon.Locales.enUS = {
         MSG_NO_BOUNTIFUL = "No Bountiful Midnight delve is left today, so auto-select was skipped. (Selecting it would send you to a regular delve)",
         MSG_NO_MIDNIGHT_OPTION = "The Midnight delve option is missing, so auto-select was skipped. (Buy \"Delve-O-Bot 7001: Midnight Software Update Chip\" from the vendor in Silvermoon)",
         MSG_DELVEBOT_SELECTED = "Delve-o-Bot 7001: Midnight delve selected automatically.",
+        MSG_DELVEBOT_DEFAULT_OFF = "Delve-o-Bot 7001 auto-select is now off by default. Turn it on in /hdtset if you want to use it.",
         MSG_DUNDUN_KEYS = "%s: %s %s%d|r (%d needed to open both chests)",
         MSG_GRACE_CLAIMED = "Recorded this week's %s reward as claimed.",
         MSG_GRACE_EXTRA = "You already claimed this week's %s reward. Use the new one next week.",

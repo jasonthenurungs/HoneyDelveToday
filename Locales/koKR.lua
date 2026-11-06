@@ -113,6 +113,7 @@ addon.Locales.koKR = {
         MSG_NO_BOUNTIFUL = "오늘은 더이상 풍요로운 한밤 구렁이 없어 자동 선택하지 않았습니다. (선택 시 일반 구렁으로 이동)",
         MSG_NO_MIDNIGHT_OPTION = "한밤 구렁 선택지가 없어 자동 선택하지 않았습니다. (실버문 상인에게서 \"구렁로봇 7001: 한밤 소프트웨어 업데이트 칩\" 구매 필요)",
         MSG_DELVEBOT_SELECTED = "구렁로봇 7001: 한밤 구렁을 자동 선택했습니다.",
+        MSG_DELVEBOT_DEFAULT_OFF = "구렁로봇 7001 한밤 구렁 자동 선택이 이번 업데이트부터 기본 꺼짐으로 바뀌었습니다. 쓰시려면 /hdtset에서 켜 주세요.",
         MSG_DUNDUN_KEYS = "%s: 보유 %s %s%d개|r (상자 2개를 모두 열려면 %d개 필요)",
         MSG_GRACE_CLAIMED = "이번 주 %s 보상 수령을 기록했습니다.",
         MSG_GRACE_EXTRA = "이번 주 %s 보상은 이미 받았습니다. 새로 얻은 은혜는 다음 주에 사용하세요.",
