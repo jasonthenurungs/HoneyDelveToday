@@ -72,7 +72,7 @@ local CURIO_BUFF_ICON_FALLBACK = 2967107
 local CURIO_TEXT = {
     koKR = {
         GROUP = "진귀품 버프 표시",
-        DESC = "구렁에서 잘못 놓여진 진귀품을 주우면 걸리는 버프(%s)의 내용을 버프창을 찾아보지 않아도 볼 수 있도록 화면에 띄웁니다.",
+        DESC = "구렁에서 잘못 놓여진 진귀품을 주우면 걸리는 버프(%s)의 내용을 버프창을 찾아보지 않아도 볼 수 있도록 화면에 띄웁니다.\n창 제목 줄에 마우스를 올리면 나오는 X 버튼으로 닫을 수 있고(다음 로딩 화면까지), Shift를 누른 채 제목 줄을 끌면 옮길 수 있습니다.",
         SHOW = "진귀품 버프 내용 표시",
         LOCK = "위치 잠금",
         LOCK_DESC = "잠금을 풀면 버프가 없어도 미리보기 창이 나타나며, 마우스로 끌어서 옮길 수 있습니다.\n위치를 정한 뒤 다시 잠그면 창이 마우스 클릭을 가로채지 않습니다.",
@@ -86,7 +86,7 @@ local CURIO_TEXT = {
     },
     enUS = {
         GROUP = "Curio Buff Display",
-        DESC = "Shows the details of the buff (%s) you get from picking up misplaced curios in delves, so you do not have to look for it on the buff bar.",
+        DESC = "Shows the details of the buff (%s) you get from picking up misplaced curios in delves, so you do not have to look for it on the buff bar.\nHover over the window title to show an X button that closes it (until the next loading screen). Hold Shift and drag the title to move it.",
         SHOW = "Show curio buff details",
         LOCK = "Lock position",
         LOCK_DESC = "When unlocked, a preview window appears even without the buff and can be dragged with the mouse.\nLock it again after positioning so it does not catch mouse clicks.",
@@ -649,6 +649,8 @@ local function BuildOptions()
                                 get = function() return HoneyDelveDB.ShowCurioBuff end,
                                 set = function(_, val)
                                     HoneyDelveDB.ShowCurioBuff = val
+                                    -- 설정창에서 다시 켜면 X 버튼으로 닫아 둔 상태도 푼다.
+                                    if val then HDT:ClearCurioClosed() end
                                     HDT:UpdateCurioBuff()
                                 end,
                             },
@@ -937,6 +939,9 @@ end
 --   툴팁 데이터는 다른 애드온이 GameTooltip에 덧붙인 줄(SpellID, IconID 등)을 포함하지 않는다.
 -- 위치 잠금을 풀면 버프가 없어도 미리보기로 나타나며 드래그로 옮길 수 있다.
 -- 잠그면 마우스 클릭을 통과시킨다.
+-- 잠근 상태에서도 제목 줄만은 마우스오버를 받는다. (창 전체가 받으면 창 아래 몬스터 마우스오버가 막힘)
+--   제목 줄에 마우스를 올리면 X 버튼이 나타나고, 누르면 다음 로딩 화면까지 숨긴다.
+--   Shift를 누르고 있는 동안만 제목 줄이 클릭을 받아 끌어서 옮길 수 있다.
 --
 -- 구렁 안이나 전투 중에는 버프 정보가 보안값(secret value)으로 올 가능성이 있다. (12.x 제한, 인게임 확인 필요)
 --   보안값 글자는 가공(줄 나누기, 이어 붙이기)하지 않고 글자 칸에 그대로 넣는다.
@@ -950,6 +955,7 @@ local CURIO_SECRET_WIDTH = 220     -- 보안값 글자라 너비를 잴 수 없�
 local CURIO_SECRET_LINES = 9       -- 보안값 글자라 높이를 잴 수 없을 때 가정하는 줄 수
 local CURIO_DEFAULT_POS = { "CENTER", "CENTER", 0, 200 }
 local CURIO_RETRY_MAX = 5          -- 버프는 있는데 설명을 못 읽었을 때 재시도 횟수
+local CURIO_CLOSE_SIZE = 24        -- 제목 줄 오른쪽 X 버튼 크기 (제목 줄 너비에 이만큼 자리를 비워 둔다)
 
 local function IsSecret(value)
     return issecretvalue ~= nil and issecretvalue(value) == true
@@ -994,6 +1000,11 @@ curioFrame.title:SetPoint("LEFT", curioFrame.icon, "RIGHT", CURIO_ICON_GAP, 0)
 curioFrame.title:SetJustifyH("LEFT")
 curioFrame.title:SetWordWrap(false)
 
+local function SaveCurioPosition()
+    local point, _, relativePoint, xOfs, yOfs = curioFrame:GetPoint()
+    HoneyDelveDB.CurioBuffPos = { point, relativePoint, xOfs, yOfs }
+end
+
 -- 드래그 핸들: 잠금을 풀었을 때만 마우스를 받는다 (잠금 상태에서는 클릭이 아래로 통과)
 local curioDrag = CreateFrame("Frame", nil, curioFrame)
 curioDrag:SetAllPoints(curioFrame)
@@ -1006,8 +1017,77 @@ curioDrag:SetScript("OnDragStart", function()
 end)
 curioDrag:SetScript("OnDragStop", function()
     curioFrame:StopMovingOrSizing()
-    local point, _, relativePoint, xOfs, yOfs = curioFrame:GetPoint()
-    HoneyDelveDB.CurioBuffPos = { point, relativePoint, xOfs, yOfs }
+    SaveCurioPosition()
+end)
+
+-- 제목 줄 핸들: 잠금 상태에서만 쓴다. 마우스오버는 항상 받고, 클릭은 Shift를 누른 동안만 받는다.
+local curioHandle = CreateFrame("Frame", nil, curioFrame)
+curioHandle:SetPoint("TOPLEFT", curioFrame, "TOPLEFT", 0, 0)
+curioHandle:SetPoint("TOPRIGHT", curioFrame, "TOPRIGHT", 0, 0)
+curioHandle:SetHeight(CURIO_PAD * 2 + CURIO_ICON_SIZE)
+curioHandle:EnableMouse(false)
+curioHandle:RegisterForDrag("LeftButton")
+
+-- X 버튼: 제목 줄에 마우스를 올렸을 때만 보인다.
+local curioClose = CreateFrame("Button", nil, curioFrame, "UIPanelCloseButton")
+curioClose:SetSize(CURIO_CLOSE_SIZE, CURIO_CLOSE_SIZE)
+curioClose:SetPoint("RIGHT", curioFrame, "TOPRIGHT", -2, -(CURIO_PAD + CURIO_ICON_SIZE / 2))
+curioClose:SetFrameLevel(curioHandle:GetFrameLevel() + 2)
+curioClose:Hide()
+
+-- 마우스가 제목 줄과 X 버튼을 모두 벗어나면 X 버튼을 숨기고 클릭 통과 상태로 되돌린다.
+local function EndCurioHover()
+    if curioFrame.isMoving then return end
+    if curioHandle:IsMouseOver() or curioClose:IsMouseOver() then return end
+    curioClose:Hide()
+    curioHandle:SetMouseClickEnabled(false)
+    curioHandle:UnregisterEvent("MODIFIER_STATE_CHANGED")
+end
+
+curioHandle:SetScript("OnEnter", function()
+    curioClose:Show()
+    curioHandle:SetMouseClickEnabled(IsShiftKeyDown())
+    curioHandle:RegisterEvent("MODIFIER_STATE_CHANGED")
+end)
+curioHandle:SetScript("OnLeave", EndCurioHover)
+curioClose:SetScript("OnLeave", EndCurioHover)
+
+-- 마우스를 올린 채 Shift를 누르거나 떼면 클릭 받기를 바꾼다. (끄는 중에는 그대로 둔다)
+curioHandle:SetScript("OnEvent", function()
+    if curioFrame.isMoving then return end
+    curioHandle:SetMouseClickEnabled(IsShiftKeyDown())
+end)
+
+curioHandle:SetScript("OnDragStart", function()
+    if IsShiftKeyDown() then
+        curioFrame.isMoving = true
+        curioFrame:StartMoving()
+    end
+end)
+curioHandle:SetScript("OnDragStop", function()
+    if not curioFrame.isMoving then return end
+    curioFrame.isMoving = false
+    curioFrame:StopMovingOrSizing()
+    SaveCurioPosition()
+    curioHandle:SetMouseClickEnabled(IsShiftKeyDown())
+    EndCurioHover()
+end)
+
+curioClose:SetScript("OnClick", function()
+    curioFrame.closedByUser = true
+    curioFrame:Hide()
+end)
+
+-- 창이 숨겨지면(버프 종료, X 버튼 등) 끌던 중이라도 멈추고 마우스오버 상태를 정리한다.
+curioFrame:SetScript("OnHide", function()
+    if curioFrame.isMoving then
+        curioFrame.isMoving = false
+        curioFrame:StopMovingOrSizing()
+        SaveCurioPosition()
+    end
+    curioClose:Hide()
+    curioHandle:SetMouseClickEnabled(false)
+    curioHandle:UnregisterEvent("MODIFIER_STATE_CHANGED")
 end)
 
 local function ApplyCurioPosition()
@@ -1080,8 +1160,10 @@ local function RenderCurio(lines, isPreview)
     curioFrame.title:SetFont(fontPath, fontSize + 1, fontFlags)
     curioFrame.title:SetText(titleText)
 
+    -- 제목 줄 오른쪽에 X 버튼 자리를 비워 둔다. (마우스를 올렸을 때 X 버튼이 제목을 가리지 않도록)
     local maxWidth = CURIO_ICON_SIZE + CURIO_ICON_GAP
         + SafeNumber(function() return curioFrame.title:GetStringWidth() end, 100)
+        + CURIO_CLOSE_SIZE
     local y = CURIO_PAD + CURIO_ICON_SIZE + CURIO_TITLE_GAP
 
     for i, text in ipairs(lines) do
@@ -1125,9 +1207,23 @@ local curioUpdatePending = false
 
 function HDT:UpdateCurioBuff()
     if not HoneyDelveDB then return end
-    curioDrag:EnableMouse(not HoneyDelveDB.CurioBuffLocked)
+    local locked = (HoneyDelveDB.CurioBuffLocked == true)
+    curioDrag:EnableMouse(not locked)
+    -- 잠금 상태: 제목 줄은 마우스오버만 받고 클릭은 통과 (Shift를 누르면 OnEnter/OnEvent에서 클릭을 켠다)
+    -- 잠금 해제 상태: 창 전체 드래그 핸들을 쓰므로 제목 줄은 마우스를 받지 않는다.
+    curioHandle:SetMouseMotionEnabled(locked)
+    if not (locked and curioHandle:IsMouseOver()) then
+        curioHandle:SetMouseClickEnabled(false)
+    end
+    if not locked then curioClose:Hide() end
 
     if not HoneyDelveDB.ShowCurioBuff then
+        curioFrame:Hide()
+        return
+    end
+
+    -- X 버튼으로 닫았으면 다음 로딩 화면까지 숨긴다. (잠금을 풀어 위치를 조정할 때는 미리보기를 보여 준다)
+    if curioFrame.closedByUser and locked then
         curioFrame:Hide()
         return
     end
@@ -1172,6 +1268,11 @@ end
 function HDT:ResetCurioPosition()
     HoneyDelveDB.CurioBuffPos = nil
     ApplyCurioPosition()
+end
+
+-- X 버튼으로 닫아 둔 상태를 푼다. (설정창 코드가 curioFrame보다 위에 있어 함수로 감싸서 쓴다)
+function HDT:ClearCurioClosed()
+    curioFrame.closedByUser = false
 end
 
 -- 버프 변동(UNIT_AURA)은 자주 발생하므로 0.2초에 한 번만 갱신한다.
@@ -2724,6 +2825,7 @@ end
 
 function HDT:PLAYER_ENTERING_WORLD()
     graceAlert.closedByUser = false
+    curioFrame.closedByUser = false
     -- 순간이동 로딩 중 GOSSIP_CLOSED가 누락되어도 다음 구렁로봇 대화가 막히지 않도록 초기화
     delveBotHandled = false
     dundunChatNotified = false
