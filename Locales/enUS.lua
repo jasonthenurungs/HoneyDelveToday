@@ -23,7 +23,8 @@ addon.Locales.enUS = {
         LDB_TOOLTIP = "Left-click: Dashboard\nRight-click: Settings",
         GRACE_ALERT = "[HDT] Use your %s!",
         GRACE_ALERT_WAIT = "[HDT] Open the hidden chest after the weekly reset",
-        GRACE_ALERT_CLICK = "Click to use. (Drag to move)",
+        GRACE_ALERT_USED = "[HDT] Bounty used",
+        GRACE_ALERT_CLICK ="Click to use. (Drag to move)",
         ABUNDANCE = "Abundantly Bountiful",
 
         -- Settings: General

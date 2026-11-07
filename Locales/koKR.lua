@@ -17,7 +17,8 @@ addon.Locales.koKR = {
         LDB_TOOLTIP = "좌클릭: 대시보드\n우클릭: 설정창",
         GRACE_ALERT = "[HDT] 은혜 쓰세요",
         GRACE_ALERT_WAIT = "[HDT] 숨겨진 상자는 리셋 후 여세요",
-        GRACE_ALERT_CLICK = "클릭하면 사용합니다. (끌면 창 이동)",
+        GRACE_ALERT_USED = "[HDT] 은혜 사용함",
+        GRACE_ALERT_CLICK ="클릭하면 사용합니다. (끌면 창 이동)",
         ABUNDANCE = "넘칠듯한 풍요로움",
 
         -- 설정창: 일반

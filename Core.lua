@@ -893,7 +893,7 @@ graceUseButton:SetScript("OnDragStop", function()
     HoneyDelveDB.GraceAlertPos = { point, relativePoint, xOfs, yOfs }
 end)
 graceUseButton:SetScript("OnEnter", function(self)
-    if not self:GetAttribute("type") then return end
+    if not self:GetAttribute("type") or graceAlert.usedInCombat then return end
     GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
     GameTooltip:SetItemByID(BOUNTY_ITEM_ID)
     GameTooltip:AddLine(" ")
@@ -904,6 +904,35 @@ graceUseButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
 -- 전투 중에 알림창을 바꿔야 했는지 기록 (전투가 끝나면 UpdateGraceAlert를 다시 부른다)
 local graceAlertPending = false
+
+-- 사용 알림을 띄울 때 가방의 은혜 개수 (은행 제외, 전투 중 사용 감지용)
+local graceAlertBagCount = nil
+
+local function GetGraceBagCount()
+    if C_Item and C_Item.GetItemCount then
+        return C_Item.GetItemCount(BOUNTY_ITEM_ID) or 0
+    end
+    return 0
+end
+
+-- 전투 중에 은혜를 썼는지 가방 개수로 판단해서 알림창 모양만 바꾼다.
+-- 전투 중에는 버프를 조회하지 않고, 보호 프레임이라 숨길 수도 없다. 투명도와 글자는 바꿀 수 있다. (인게임 확인 필요)
+--   가방에 은혜가 남지 않았으면 투명하게 한다. 클릭 영역은 전투가 끝날 때까지 남지만 쓸 아이템이 없다.
+--   아직 남아 있으면 숨기지 않고 문구만 바꾼다. (보이지 않는 곳을 눌러 두 번째 은혜가 쓰이지 않도록)
+-- 전투가 끝나면 UpdateGraceAlert가 투명도와 문구를 원래대로 되돌린다.
+local function CheckGraceUsedInCombat()
+    if graceAlert.usedInCombat or not graceAlertBagCount then return end
+    if not graceAlert:IsShown() or graceUseButton:GetAttribute("type") ~= "item" then return end
+    local count = GetGraceBagCount()
+    if count >= graceAlertBagCount then return end
+    graceAlert.usedInCombat = true
+    GameTooltip:Hide()
+    if count == 0 then
+        graceAlert:SetAlpha(0)
+    else
+        graceAlertText:SetText("|cff00ff00" .. L.GRACE_ALERT_USED .. "|r")
+    end
+end
 
 -- 저장된 알림창 위치 적용, 없으면 화면 중앙 (보호 프레임이라 전투 중에는 하지 않는다)
 local function ApplyGraceAlertPosition()
@@ -939,9 +968,12 @@ function HDT:UpdateGraceAlert()
     -- 보호 프레임이라 전투 중에는 바꿀 수 없다. 전투가 끝나면(PLAYER_REGEN_ENABLED) 다시 부른다.
     if InCombatLockdown() then
         graceAlertPending = true
+        CheckGraceUsedInCombat()
         return
     end
     graceAlertPending = false
+    graceAlert.usedInCombat = false
+    graceAlert:SetAlpha(1)
     -- 전투 중에 불러와서 위치를 아직 못 정한 경우
     if graceAlert:GetNumPoints() == 0 then ApplyGraceAlertPosition() end
     -- 90레벨 미만 캐릭터에는 알림 미표시
@@ -964,6 +996,7 @@ function HDT:UpdateGraceAlert()
     end
     -- 사용 알림일 때만 클릭으로 아이템을 쓴다.
     graceUseButton:SetAttribute("type", canUse and "item" or nil)
+    graceAlertBagCount = canUse and GetGraceBagCount() or nil
 
     -- 설정 ON + 표시할 알림이 있음 + 구렁(scenario) 내부 + 유저가 직접 닫지 않은 경우
     if HoneyDelveDB.ShowGraceAlert
