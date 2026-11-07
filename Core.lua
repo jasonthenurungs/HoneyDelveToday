@@ -871,23 +871,62 @@ graceAlertIcon:SetTexture(1064187)
 local graceAlertText = graceAlert:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 graceAlertText:SetPoint("LEFT", graceAlertIcon, "RIGHT", 10, 0)
 
--- 드래그 핸들 (프레임 전체 영역에서 드래그 가능)
-local dragHandle = CreateFrame("Frame", nil, graceAlert)
-dragHandle:SetAllPoints(graceAlert)
-dragHandle:EnableMouse(true)
-dragHandle:RegisterForDrag("LeftButton")
-dragHandle:SetScript("OnDragStart", function() graceAlert:StartMoving() end)
-dragHandle:SetScript("OnDragStop", function()
+-- 클릭하면 은혜 아이템을 쓰는 버튼 (알림창 전체 영역, 끌면 창 이동)
+-- 아이템 사용은 보안 동작이라 SecureActionButtonTemplate으로 만든다.
+-- 보안 버튼을 자식으로 두면 graceAlert도 보호 프레임이 되어, 전투 중에는 보이기, 숨기기, 크기, 위치,
+-- 속성을 바꿀 수 없다. 그래서 전투 중에는 알림창을 그대로 두고 전투가 끝난 뒤 다시 맞춘다.
+-- 사용 알림일 때만 type 속성을 넣고, 상자 경고일 때는 비워서 클릭해도 아무 일이 없게 한다.
+-- 버튼을 누를 때가 아니라 뗄 때 사용해서, 끌어서 옮길 때 아이템이 쓰이지 않게 한다. (인게임 확인 필요)
+local graceUseButton = CreateFrame("Button", nil, graceAlert, "SecureActionButtonTemplate")
+graceUseButton:SetAllPoints(graceAlert)
+graceUseButton:RegisterForClicks("LeftButtonUp")
+graceUseButton:RegisterForDrag("LeftButton")
+graceUseButton:SetAttribute("useOnKeyDown", false)
+graceUseButton:SetAttribute("item", "item:" .. BOUNTY_ITEM_ID)
+graceUseButton:SetScript("OnDragStart", function()
+    if InCombatLockdown() then return end
+    graceAlert:StartMoving()
+end)
+graceUseButton:SetScript("OnDragStop", function()
     graceAlert:StopMovingOrSizing()
     local point, _, relativePoint, xOfs, yOfs = graceAlert:GetPoint()
     HoneyDelveDB.GraceAlertPos = { point, relativePoint, xOfs, yOfs }
 end)
+graceUseButton:SetScript("OnEnter", function(self)
+    if not self:GetAttribute("type") then return end
+    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+    GameTooltip:SetItemByID(BOUNTY_ITEM_ID)
+    GameTooltip:AddLine(" ")
+    GameTooltip:AddLine(L.GRACE_ALERT_CLICK, 0, 1, 0)
+    GameTooltip:Show()
+end)
+graceUseButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
--- X 닫기 버튼
+-- 전투 중에 알림창을 바꿔야 했는지 기록 (전투가 끝나면 UpdateGraceAlert를 다시 부른다)
+local graceAlertPending = false
+
+-- 저장된 알림창 위치 적용, 없으면 화면 중앙 (보호 프레임이라 전투 중에는 하지 않는다)
+local function ApplyGraceAlertPosition()
+    if InCombatLockdown() then return end
+    local p = HoneyDelveDB.GraceAlertPos
+    graceAlert:ClearAllPoints()
+    if p then
+        graceAlert:SetPoint(p[1], UIParent, p[2], p[3], p[4])
+    else
+        graceAlert:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    end
+end
+
+-- X 닫기 버튼 (전투 중에 누르면 전투가 끝난 뒤 닫힌다)
 local graceAlertClose = CreateFrame("Button", nil, graceAlert, "UIPanelCloseButton")
 graceAlertClose:SetPoint("TOPRIGHT", graceAlert, "TOPRIGHT", 4, 4)
+graceAlertClose:SetFrameLevel(graceUseButton:GetFrameLevel() + 2)
 graceAlertClose:SetScript("OnClick", function()
     graceAlert.closedByUser = true
+    if InCombatLockdown() then
+        graceAlertPending = true
+        return
+    end
     graceAlert:Hide()
 end)
 
@@ -897,6 +936,14 @@ end)
 -- 은혜 버프가 있고 이번 주 보상을 아직 받지 않았다면 알림을 띄우지 않는다. (상자를 열면 정상 보상)
 -- 이번 주 보상을 이미 받은 캐릭터가 추가로 얻은 은혜는 써도 보상이 없으므로 사용 알림을 띄우지 않는다.
 function HDT:UpdateGraceAlert()
+    -- 보호 프레임이라 전투 중에는 바꿀 수 없다. 전투가 끝나면(PLAYER_REGEN_ENABLED) 다시 부른다.
+    if InCombatLockdown() then
+        graceAlertPending = true
+        return
+    end
+    graceAlertPending = false
+    -- 전투 중에 불러와서 위치를 아직 못 정한 경우
+    if graceAlert:GetNumPoints() == 0 then ApplyGraceAlertPosition() end
     -- 90레벨 미만 캐릭터에는 알림 미표시
     if UnitLevel("player") < 90 then
         graceAlert:Hide()
@@ -906,13 +953,17 @@ function HDT:UpdateGraceAlert()
     local _, instanceType = IsInInstance()
 
     local alertText = nil
+    local canUse = false
     if hasBuff then
         if claimed then
             alertText = "|cffff8000" .. L.GRACE_ALERT_WAIT .. "|r"
         end
     elseif hasItem and not claimed then
         alertText = "|cffffff00" .. L.GRACE_ALERT:format(addon.GetName("Grace")) .. "|r"
+        canUse = true
     end
+    -- 사용 알림일 때만 클릭으로 아이템을 쓴다.
+    graceUseButton:SetAttribute("type", canUse and "item" or nil)
 
     -- 설정 ON + 표시할 알림이 있음 + 구렁(scenario) 내부 + 유저가 직접 닫지 않은 경우
     if HoneyDelveDB.ShowGraceAlert
@@ -1005,6 +1056,31 @@ local function SaveCurioPosition()
     HoneyDelveDB.CurioBuffPos = { point, relativePoint, xOfs, yOfs }
 end
 
+-- 창 옮기기 시작과 끝
+-- OnDragStop은 끄는 도중 마우스 받기 설정이 바뀌거나 커서가 핸들 밖으로 나가면 오지 않을 수 있다.
+-- 그러면 창이 커서에 붙은 채 남으므로, 끄는 동안 매 프레임 왼쪽 버튼이 눌려 있는지 직접 확인해서 멈춘다.
+local function StopCurioMove()
+    if not curioFrame.isMoving then return end
+    curioFrame.isMoving = false
+    curioFrame:SetScript("OnUpdate", nil)
+    curioFrame:StopMovingOrSizing()
+    SaveCurioPosition()
+end
+
+local function CurioMoveWatch()
+    if not IsMouseButtonDown("LeftButton") then
+        StopCurioMove()
+        if curioFrame.onMoveEnd then curioFrame.onMoveEnd() end
+    end
+end
+
+local function StartCurioMove()
+    if curioFrame.isMoving then return end
+    curioFrame.isMoving = true
+    curioFrame:StartMoving()
+    curioFrame:SetScript("OnUpdate", CurioMoveWatch)
+end
+
 -- 드래그 핸들: 잠금을 풀었을 때만 마우스를 받는다 (잠금 상태에서는 클릭이 아래로 통과)
 local curioDrag = CreateFrame("Frame", nil, curioFrame)
 curioDrag:SetAllPoints(curioFrame)
@@ -1012,13 +1088,11 @@ curioDrag:EnableMouse(false)
 curioDrag:RegisterForDrag("LeftButton")
 curioDrag:SetScript("OnDragStart", function()
     if HoneyDelveDB and not HoneyDelveDB.CurioBuffLocked then
-        curioFrame:StartMoving()
+        StartCurioMove()
     end
 end)
-curioDrag:SetScript("OnDragStop", function()
-    curioFrame:StopMovingOrSizing()
-    SaveCurioPosition()
-end)
+curioDrag:SetScript("OnDragStop", StopCurioMove)
+curioDrag:SetScript("OnMouseUp", StopCurioMove)
 
 -- 제목 줄 핸들: 잠금 상태에서만 쓴다. 마우스오버는 항상 받고, 클릭은 Shift를 누른 동안만 받는다.
 local curioHandle = CreateFrame("Frame", nil, curioFrame)
@@ -1046,7 +1120,10 @@ end
 
 curioHandle:SetScript("OnEnter", function()
     curioClose:Show()
-    curioHandle:SetMouseClickEnabled(IsShiftKeyDown())
+    -- 끄는 도중 커서가 다시 들어온 경우 Shift를 이미 뗐어도 클릭 받기를 끄지 않는다.
+    if not curioFrame.isMoving then
+        curioHandle:SetMouseClickEnabled(IsShiftKeyDown())
+    end
     curioHandle:RegisterEvent("MODIFIER_STATE_CHANGED")
 end)
 curioHandle:SetScript("OnLeave", EndCurioHover)
@@ -1058,20 +1135,24 @@ curioHandle:SetScript("OnEvent", function()
     curioHandle:SetMouseClickEnabled(IsShiftKeyDown())
 end)
 
-curioHandle:SetScript("OnDragStart", function()
-    if IsShiftKeyDown() then
-        curioFrame.isMoving = true
-        curioFrame:StartMoving()
-    end
-end)
-curioHandle:SetScript("OnDragStop", function()
-    if not curioFrame.isMoving then return end
-    curioFrame.isMoving = false
-    curioFrame:StopMovingOrSizing()
-    SaveCurioPosition()
-    curioHandle:SetMouseClickEnabled(IsShiftKeyDown())
+-- 다 옮긴 뒤(버튼을 뗀 뒤) 마우스오버 상태를 다시 맞춘다. (잠금 상태에서만)
+curioFrame.onMoveEnd = function()
+    if not (HoneyDelveDB and HoneyDelveDB.CurioBuffLocked == true) then return end
+    curioHandle:SetMouseClickEnabled(IsShiftKeyDown() and curioHandle:IsMouseOver())
     EndCurioHover()
+end
+
+local function FinishCurioHandleMove()
+    if not curioFrame.isMoving then return end
+    StopCurioMove()
+    curioFrame.onMoveEnd()
+end
+
+curioHandle:SetScript("OnDragStart", function()
+    if IsShiftKeyDown() then StartCurioMove() end
 end)
+curioHandle:SetScript("OnDragStop", FinishCurioHandleMove)
+curioHandle:SetScript("OnMouseUp", FinishCurioHandleMove)
 
 curioClose:SetScript("OnClick", function()
     curioFrame.closedByUser = true
@@ -1080,11 +1161,7 @@ end)
 
 -- 창이 숨겨지면(버프 종료, X 버튼 등) 끌던 중이라도 멈추고 마우스오버 상태를 정리한다.
 curioFrame:SetScript("OnHide", function()
-    if curioFrame.isMoving then
-        curioFrame.isMoving = false
-        curioFrame:StopMovingOrSizing()
-        SaveCurioPosition()
-    end
+    StopCurioMove()
     curioClose:Hide()
     curioHandle:SetMouseClickEnabled(false)
     curioHandle:UnregisterEvent("MODIFIER_STATE_CHANGED")
@@ -1208,14 +1285,17 @@ local curioUpdatePending = false
 function HDT:UpdateCurioBuff()
     if not HoneyDelveDB then return end
     local locked = (HoneyDelveDB.CurioBuffLocked == true)
-    curioDrag:EnableMouse(not locked)
-    -- 잠금 상태: 제목 줄은 마우스오버만 받고 클릭은 통과 (Shift를 누르면 OnEnter/OnEvent에서 클릭을 켠다)
-    -- 잠금 해제 상태: 창 전체 드래그 핸들을 쓰므로 제목 줄은 마우스를 받지 않는다.
-    curioHandle:SetMouseMotionEnabled(locked)
-    if not (locked and curioHandle:IsMouseOver()) then
-        curioHandle:SetMouseClickEnabled(false)
+    -- 끄는 도중에 마우스 받기 설정을 바꾸면 버튼을 뗀 것을 놓칠 수 있으므로 끄는 중에는 건드리지 않는다.
+    if not curioFrame.isMoving then
+        curioDrag:EnableMouse(not locked)
+        -- 잠금 상태: 제목 줄은 마우스오버만 받고 클릭은 통과 (Shift를 누르면 OnEnter/OnEvent에서 클릭을 켠다)
+        -- 잠금 해제 상태: 창 전체 드래그 핸들을 쓰므로 제목 줄은 마우스를 받지 않는다.
+        curioHandle:SetMouseMotionEnabled(locked)
+        if not (locked and curioHandle:IsMouseOver()) then
+            curioHandle:SetMouseClickEnabled(false)
+        end
+        if not locked then curioClose:Hide() end
     end
-    if not locked then curioClose:Hide() end
 
     if not HoneyDelveDB.ShowCurioBuff then
         curioFrame:Hide()
@@ -2760,13 +2840,8 @@ function HDT:OnInitialize()
     })
     icon:Register(AddonName, HDTLDB, HoneyDelveDB.Minimap)
     if HoneyDelveTodayFrame.CustomBg then HoneyDelveTodayFrame.CustomBg:SetColorTexture(0, 0, 0, HoneyDelveDB.Alpha) end
-    -- 저장된 알림창 위치 복원, 없으면 화면 중앙
-    if HoneyDelveDB.GraceAlertPos then
-        local p = HoneyDelveDB.GraceAlertPos
-        graceAlert:SetPoint(p[1], UIParent, p[2], p[3], p[4])
-    else
-        graceAlert:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-    end
+    -- 저장된 알림창 위치 복원, 없으면 화면 중앙 (전투 중이면 UpdateGraceAlert가 전투 뒤에 한다)
+    ApplyGraceAlertPosition()
     -- 진귀품 버프 창 위치 복원 (없으면 기본 위치) 및 플레이어 버프 변동 이벤트 등록
     ApplyCurioPosition()
     curioEventFrame:RegisterUnitEvent("UNIT_AURA", "player")
@@ -2821,6 +2896,7 @@ end
 -- 전투 중에 유지해 둔 진귀품 버프 표시를 전투가 끝나면 다시 확인
 function HDT:PLAYER_REGEN_ENABLED()
     HDT:UpdateCurioBuff()
+    if graceAlertPending then HDT:UpdateGraceAlert() end
 end
 
 function HDT:PLAYER_ENTERING_WORLD()

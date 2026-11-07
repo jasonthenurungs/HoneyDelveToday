@@ -23,6 +23,7 @@ addon.Locales.enUS = {
         LDB_TOOLTIP = "Left-click: Dashboard\nRight-click: Settings",
         GRACE_ALERT = "[HDT] Use your %s!",
         GRACE_ALERT_WAIT = "[HDT] Open the hidden chest after the weekly reset",
+        GRACE_ALERT_CLICK = "Click to use. (Drag to move)",
         ABUNDANCE = "Abundantly Bountiful",
 
         -- Settings: General
@@ -38,7 +39,7 @@ addon.Locales.enUS = {
         OPT_SHOW_MINIMAP = "Show minimap icon",
         OPT_SHOW_MEMO = "Show memos",
         OPT_GRACE_ALERT = "Show bounty item alert",
-        OPT_GRACE_ALERT_DESC = "Shows an alert in the middle of the screen inside a delve while you have %s in your bags. If you already claimed this week's hidden chest reward, it instead warns you to open the hidden chest after the weekly reset while the bounty effect is still active.",
+        OPT_GRACE_ALERT_DESC = "Shows an alert in the middle of the screen inside a delve while you have %s in your bags. Click the alert to use the item. If you already claimed this week's hidden chest reward, it instead warns you to open the hidden chest after the weekly reset while the bounty effect is still active.",
 
         -- Settings: Dashboard trackers
         OPT_TRACKER_GROUP = "Dashboard trackers",

@@ -17,6 +17,7 @@ addon.Locales.koKR = {
         LDB_TOOLTIP = "좌클릭: 대시보드\n우클릭: 설정창",
         GRACE_ALERT = "[HDT] 은혜 쓰세요",
         GRACE_ALERT_WAIT = "[HDT] 숨겨진 상자는 리셋 후 여세요",
+        GRACE_ALERT_CLICK = "클릭하면 사용합니다. (끌면 창 이동)",
         ABUNDANCE = "넘칠듯한 풍요로움",
 
         -- 설정창: 일반
@@ -32,7 +33,7 @@ addon.Locales.koKR = {
         OPT_SHOW_MINIMAP = "미니맵 아이콘 표시",
         OPT_SHOW_MEMO = "메모 표시",
         OPT_GRACE_ALERT = "은혜 알림 표시",
-        OPT_GRACE_ALERT_DESC = "%s 아이템을 보유 중인 경우 구렁 안에서 화면 중앙에 알림을 표시합니다. 이번 주 숨겨진 상자 보상을 이미 받았다면 사용 알림 대신, 은혜 효과가 남아 있을 때 숨겨진 상자를 리셋 후 열라는 경고를 표시합니다.",
+        OPT_GRACE_ALERT_DESC = "%s 아이템을 보유 중인 경우 구렁 안에서 화면 중앙에 알림을 표시합니다. 사용 알림을 클릭하면 아이템을 사용합니다. 이번 주 숨겨진 상자 보상을 이미 받았다면 사용 알림 대신, 은혜 효과가 남아 있을 때 숨겨진 상자를 리셋 후 열라는 경고를 표시합니다.",
 
         -- 설정창: 대시보드 추적 요소
         OPT_TRACKER_GROUP = "대시보드 추적 요소",
