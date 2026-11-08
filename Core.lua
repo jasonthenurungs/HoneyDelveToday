@@ -2441,6 +2441,17 @@ local function HandleDelveBotGossip()
         return
     end
 
+    -- QTR(골드퀘로 부자되기) 내비게이션이 지금 킨도잔의 미궁을 고르려 하면 한밤 구렁 자동 선택을 건너뛴다
+    -- 풍요 구렁 없음 같은 안내가 함께 나오지 않도록 다른 판정보다 먼저 확인한다.
+    -- QTR이 없으면 함수가 nil이라 지금과 똑같이 동작하고, 함수가 오류를 내도 pcall로 막는다.
+    local qtrWants = QuestsToRiches_WantsDelveBotLabyrinth
+    if type(qtrWants) == "function" then
+        local ok, wants = pcall(qtrWants)
+        if ok and wants then
+            return
+        end
+    end
+
     -- 풍요로운 한밤 구렁이 없으면 일반 구렁으로 이동되므로 자동 선택하지 않음
     -- 만렙 미만: 풍요로운 구렁 입장 불가로 풍요 표시 자체가 없음
     -- 만렙: 풍요로운 구렁은 매일 4곳이 지정되며, 클리어할 때마다 풍요 표시가 사라짐(불이 꺼짐)
